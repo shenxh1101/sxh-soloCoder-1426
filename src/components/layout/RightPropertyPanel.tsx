@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Sliders, Palette, Crosshair, Zap, Grid3X3, Plus, Trash2 } from 'lucide-react';
 import { FixtureId, LightState, PATTERN_NAMES } from '../../types';
 import { useLightingStore } from '../../store/useLightingStore';
@@ -7,20 +7,37 @@ export function RightPropertyPanel() {
   const selectedFixtureId = useLightingStore((s) => s.selectedFixtureId);
   const selectedKeyframeId = useLightingStore((s) => s.selectedKeyframeId);
   const previewState = useLightingStore((s) => s.previewState);
+  const livePreviewOverride = useLightingStore((s) => s.livePreviewOverride);
   const currentTime = useLightingStore((s) => s.currentTime);
   const activeShow = useLightingStore((s) => s.activeShow);
 
   const addKeyframe = useLightingStore((s) => s.addKeyframe);
   const deleteKeyframe = useLightingStore((s) => s.deleteKeyframe);
   const updateKeyframe = useLightingStore((s) => s.updateKeyframe);
-  const recomputePreview = useLightingStore((s) => s.recomputePreview);
+  const setLivePreview = useLightingStore((s) => s.setLivePreview);
+  const clearLivePreview = useLightingStore((s) => s.clearLivePreview);
 
   const [liveState, setLiveState] = useState<Partial<LightState>>({});
+
+  useEffect(() => {
+    setLiveState({});
+  }, [selectedFixtureId, selectedKeyframeId]);
+
+  useEffect(() => {
+    return () => {
+      if (selectedFixtureId) clearLivePreview(selectedFixtureId);
+    };
+  }, [selectedFixtureId, clearLivePreview]);
 
   const effectiveState: LightState = {
     ...(selectedFixtureId ? previewState[selectedFixtureId] : ({} as LightState)),
     ...liveState,
   } as LightState;
+
+  const hasLiveEdits =
+    selectedFixtureId &&
+    (livePreviewOverride[selectedFixtureId] &&
+      Object.keys(livePreviewOverride[selectedFixtureId]!).length > 0);
 
   const selectedKf = activeShow?.tracks
     .flatMap((t) => t.keyframes)
@@ -29,10 +46,7 @@ export function RightPropertyPanel() {
   const updateProp = (key: keyof LightState, value: number) => {
     if (!selectedFixtureId) return;
     setLiveState((prev) => ({ ...prev, [key]: value }));
-    const store = useLightingStore.getState();
-    const prev = store.previewState[selectedFixtureId];
-    store.previewState[selectedFixtureId] = { ...prev, [key]: value };
-    recomputePreview();
+    setLivePreview(selectedFixtureId, { [key]: value } as Partial<LightState>);
 
     if (selectedKf && selectedKf.fixtureId === selectedFixtureId) {
       updateKeyframe(selectedKf.id, { state: { ...selectedKf.state, [key]: value } });
@@ -44,6 +58,7 @@ export function RightPropertyPanel() {
     const final: Partial<LightState> = { ...effectiveState };
     addKeyframe(selectedFixtureId, Math.round(currentTime * 100) / 100, final);
     setLiveState({});
+    clearLivePreview(selectedFixtureId);
   };
 
   return (

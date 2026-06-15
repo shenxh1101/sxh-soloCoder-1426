@@ -1,7 +1,7 @@
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
-import { Suspense, useRef } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Stage } from './Stage';
 import { Truss } from './Truss';
@@ -9,24 +9,46 @@ import { MovingHead } from './MovingHead';
 import { VirtualPerformer } from './VirtualPerformer';
 import { FIXTURE_IDS, FIXTURE_POSITIONS } from '../../types';
 import { useLightingStore } from '../../store/useLightingStore';
-import { useThree } from '@react-three/fiber';
 
-function CaptureThumbnail({ gl }: { gl: THREE.WebGLRenderer }) {
-  const { scene, camera } = useThree();
+function CaptureThumbnail() {
+  const { gl } = useThree();
   const activeShowId = useLightingStore((s) => s.activeShowId);
+  const isPlaying = useLightingStore((s) => s.isPlaying);
   const updateThumbnail = useLightingStore((s) => s.updateThumbnail);
-  const doneRef = useRef(false);
+  const timerRef = useRef<number | null>(null);
+  const lastCapturedIdRef = useRef<string | null>(null);
 
-  if (!doneRef.current && activeShowId) {
-    doneRef.current = true;
-    setTimeout(() => {
+  useEffect(() => {
+    if (!activeShowId) return;
+
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    const capture = () => {
       try {
-        gl.render(scene, camera);
-        const url = gl.domElement.toDataURL('image/jpeg', 0.5);
-        updateThumbnail(activeShowId, url);
-      } catch {}
-    }, 3000);
-  }
+        const canvas = gl.domElement;
+        if (!canvas || canvas.width === 0 || canvas.height === 0) return;
+        const url = canvas.toDataURL('image/jpeg', 0.6);
+        if (url && url.length > 100) {
+          updateThumbnail(activeShowId, url);
+          lastCapturedIdRef.current = activeShowId;
+        }
+      } catch {
+      }
+    };
+
+    timerRef.current = window.setTimeout(capture, activeShowId === lastCapturedIdRef.current ? 800 : 2500);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [activeShowId, gl, updateThumbnail, isPlaying]);
+
   return null;
 }
 
@@ -79,7 +101,7 @@ export function StageCanvas() {
           <VirtualPerformer index={1} position={[0, 0, -1]} color="#6bcbff" />
           <VirtualPerformer index={2} position={[4, 0, 1]} color="#ffd166" />
 
-          <CaptureThumbnail gl={null as unknown as THREE.WebGLRenderer} />
+          <CaptureThumbnail />
 
           <EffectComposer multisampling={0} enableNormalPass={false}>
             <Bloom

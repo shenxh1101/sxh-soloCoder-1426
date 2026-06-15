@@ -33,6 +33,7 @@ interface LightingState {
   selectedFixtureId: FixtureId | null;
   selectedKeyframeId: string | null;
   previewState: Record<FixtureId, LightState>;
+  livePreviewOverride: Partial<Record<FixtureId, Partial<LightState>>>;
   showBeatModal: boolean;
   showManagerModal: boolean;
   timelineScale: number;
@@ -84,6 +85,9 @@ interface LightingState {
 
   exportDMX: (showId: string) => void;
 
+  setLivePreview: (fixtureId: FixtureId, patch: Partial<LightState>) => void;
+  clearLivePreview: (fixtureId?: FixtureId) => void;
+
   recomputePreview: () => void;
 }
 
@@ -107,6 +111,7 @@ export const useLightingStore = create<LightingState>((set, get) => ({
   selectedFixtureId: 1,
   selectedKeyframeId: null,
   previewState: buildDefaultPreview(),
+  livePreviewOverride: {},
   showBeatModal: false,
   showManagerModal: false,
   timelineScale: 40,
@@ -191,7 +196,13 @@ export const useLightingStore = create<LightingState>((set, get) => ({
   },
 
   switchShow: (id) => {
-    set({ activeShowId: id, currentTime: 0, isPlaying: false });
+    set({
+      activeShowId: id,
+      currentTime: 0,
+      isPlaying: false,
+      livePreviewOverride: {},
+      selectedKeyframeId: null,
+    });
     saveActiveShowId(id);
     get().recomputePreview();
   },
@@ -298,15 +309,23 @@ export const useLightingStore = create<LightingState>((set, get) => ({
     get().recomputePreview();
   },
 
-  play: () => set({ isPlaying: true }),
+  play: () => {
+    const s = get();
+    if (Object.keys(s.livePreviewOverride).length > 0) {
+      set({ isPlaying: true, livePreviewOverride: {} });
+    } else {
+      set({ isPlaying: true });
+    }
+    get().recomputePreview();
+  },
   pause: () => set({ isPlaying: false }),
   stop: () => {
-    set({ isPlaying: false, currentTime: 0 });
+    set({ isPlaying: false, currentTime: 0, livePreviewOverride: {} });
     get().recomputePreview();
   },
 
   seek: (time) => {
-    set({ currentTime: Math.max(0, time) });
+    set({ currentTime: Math.max(0, time), livePreviewOverride: {} });
     get().recomputePreview();
   },
 
@@ -416,6 +435,37 @@ export const useLightingStore = create<LightingState>((set, get) => ({
     downloadCSV(csv, `${show.name.replace(/\s+/g, '_')}_DMX512.csv`);
   },
 
+  setLivePreview: (fixtureId, patch) => {
+    const s = get();
+    const next = { ...s.livePreviewOverride };
+    next[fixtureId] = { ...(next[fixtureId] || {}), ...patch };
+    const baseState = { ...s.previewState };
+    for (const [fidStr, overrides] of Object.entries(next)) {
+      const fid = Number(fidStr) as FixtureId;
+      baseState[fid] = { ...baseState[fid], ...overrides };
+    }
+    if (s.isBlackout) {
+      FIXTURE_IDS.forEach((id) => {
+        baseState[id] = { ...baseState[id], intensity: 0 };
+      });
+    }
+    set({ livePreviewOverride: next, previewState: baseState });
+  },
+
+  clearLivePreview: (fixtureId) => {
+    const s = get();
+    if (fixtureId === undefined) {
+      if (Object.keys(s.livePreviewOverride).length === 0) return;
+      set({ livePreviewOverride: {} });
+    } else {
+      if (!s.livePreviewOverride[fixtureId]) return;
+      const next = { ...s.livePreviewOverride };
+      delete next[fixtureId];
+      set({ livePreviewOverride: next });
+    }
+    get().recomputePreview();
+  },
+
   recomputePreview: () => {
     const s = get();
     if (!s.activeShow) return;
@@ -424,6 +474,10 @@ export const useLightingStore = create<LightingState>((set, get) => ({
       FIXTURE_IDS.forEach((id) => {
         state[id] = { ...state[id], intensity: 0 };
       });
+    }
+    for (const [fidStr, overrides] of Object.entries(s.livePreviewOverride)) {
+      const fid = Number(fidStr) as FixtureId;
+      state[fid] = { ...state[fid], ...overrides };
     }
     set({ previewState: state });
   },
